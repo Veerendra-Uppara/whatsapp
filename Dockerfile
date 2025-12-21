@@ -6,14 +6,15 @@ FROM node:18-alpine AS client-builder
 WORKDIR /app/client
 
 # Copy only package files first for better caching
-COPY client/package*.json ./
+COPY client/package.json client/package-lock.json* ./
 
 # Install all dependencies (needed for build, including devDependencies)
-RUN npm ci --silent && \
+RUN npm ci && \
     npm cache clean --force
 
-# Copy client source code
-COPY client/ ./
+# Copy client source code (exclude node_modules if it exists locally)
+COPY client/src ./src
+COPY client/public ./public
 
 # Build React app for production
 RUN npm run build && \
