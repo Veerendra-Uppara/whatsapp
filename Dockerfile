@@ -6,11 +6,13 @@ FROM node:18-alpine AS client-builder
 WORKDIR /app/client
 
 # Copy only package files first for better caching
-COPY client/package.json client/package-lock.json* ./
+COPY client/package.json client/package-lock.json ./
 
 # Install all dependencies (needed for build, including devDependencies)
 RUN npm ci && \
-    npm cache clean --force
+    npm cache clean --force && \
+    # Verify react-scripts was installed
+    test -f node_modules/.bin/react-scripts || (echo "ERROR: react-scripts not found!" && exit 1)
 
 # Copy client source code (exclude node_modules if it exists locally)
 COPY client/src ./src
