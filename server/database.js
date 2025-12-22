@@ -4,10 +4,12 @@ const { MongoClient } = require('mongodb');
 const MONGODB_URI = 'mongodb+srv://veeru:veeru123@connectapp.rdrcqrl.mongodb.net/test';
 const DB_NAME = 'Chatting';
 const COLLECTION_NAME = 'messages';
+const USERS_COLLECTION_NAME = 'users';
 
 let client = null;
 let db = null;
 let collection = null;
+let usersCollection = null;
 
 // Initialize MongoDB database
 async function initDatabase() {
@@ -22,12 +24,17 @@ async function initDatabase() {
     // Get database and collection
     db = client.db(DB_NAME);
     collection = db.collection(COLLECTION_NAME);
+    usersCollection = db.collection(USERS_COLLECTION_NAME);
 
     // Create index on timestamp for faster queries
     await collection.createIndex({ timestamp: 1 });
     await collection.createIndex({ userId: 1 });
+    
+    // Create index on username for user profile queries
+    await usersCollection.createIndex({ username: 1 }, { unique: true });
 
     console.log(`✅ MongoDB collection '${COLLECTION_NAME}' ready in database '${DB_NAME}'`);
+    console.log(`✅ MongoDB collection '${USERS_COLLECTION_NAME}' ready in database '${DB_NAME}'`);
     
     // Return collection for backward compatibility with existing code
     return collection;
@@ -152,6 +159,72 @@ async function deleteOldMessages(db, daysOld = 30) {
   }
 }
 
+// Save or update user profile photo
+async function saveUserProfilePhoto(username, photoBase64) {
+  try {
+    if (!usersCollection) {
+      throw new Error('MongoDB users collection not initialized');
+    }
+
+    const userDoc = {
+      username: username.toLowerCase().trim(),
+      photoBase64: photoBase64,
+      updatedAt: new Date()
+    };
+
+    const result = await usersCollection.updateOne(
+      { username: userDoc.username },
+      { $set: userDoc },
+      { upsert: true }
+    );
+
+    console.log(`✅ User profile photo saved for ${username}`);
+    return result;
+  } catch (err) {
+    console.error('❌ Error saving user profile photo:', err.message);
+    throw err;
+  }
+}
+
+// Get user profile photo
+async function getUserProfilePhoto(username) {
+  try {
+    if (!usersCollection) {
+      throw new Error('MongoDB users collection not initialized');
+    }
+
+    const user = await usersCollection.findOne({ 
+      username: username.toLowerCase().trim() 
+    });
+
+    if (user && user.photoBase64) {
+      return user.photoBase64;
+    }
+    return null;
+  } catch (err) {
+    console.error('❌ Error fetching user profile photo:', err.message);
+    throw err;
+  }
+}
+
+// Get all user profiles
+async function getAllUserProfiles() {
+  try {
+    if (!usersCollection) {
+      throw new Error('MongoDB users collection not initialized');
+    }
+
+    const users = await usersCollection.find({}).toArray();
+    return users.map(user => ({
+      username: user.username,
+      photoBase64: user.photoBase64 || null
+    }));
+  } catch (err) {
+    console.error('❌ Error fetching user profiles:', err.message);
+    throw err;
+  }
+}
+
 // Close database connection (useful for graceful shutdown)
 async function closeDatabase() {
   if (client) {
@@ -166,6 +239,9 @@ module.exports = {
   getMessages,
   getMessagesByUserId,
   deleteOldMessages,
+  saveUserProfilePhoto,
+  getUserProfilePhoto,
+  getAllUserProfiles,
   closeDatabase,
   DB_PATH: 'MongoDB'
 };

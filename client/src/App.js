@@ -16,6 +16,7 @@ function App() {
   const [imagePreview, setImagePreview] = useState(null);
   const [showProfile, setShowProfile] = useState(false);
   const [loginError, setLoginError] = useState('');
+  const [profilePhotos, setProfilePhotos] = useState({});
   const messagesEndRef = useRef(null);
   const typingTimeoutRef = useRef(null);
   const fileInputRef = useRef(null);
@@ -61,6 +62,11 @@ function App() {
         console.log('Updated messages array, total messages:', newMessages.length);
         return newMessages;
       });
+      
+      // Fetch profile photo for the message sender if not already loaded
+      if (data.username && !profilePhotos[data.username.toLowerCase()]) {
+        fetchProfilePhoto(data.username.toLowerCase());
+      }
     });
 
     newSocket.on('userTyping', (data) => {
@@ -247,6 +253,47 @@ function App() {
     return name.charAt(0).toUpperCase();
   };
 
+  // Fetch profile photo from API
+  const fetchProfilePhoto = async (username) => {
+    if (!username || profilePhotos[username]) {
+      return profilePhotos[username] || null;
+    }
+
+    try {
+      const socketUrl = process.env.REACT_APP_SOCKET_URL || 
+        (process.env.NODE_ENV === 'production' ? window.location.origin : 'http://localhost:5000');
+      const response = await fetch(`${socketUrl}/api/user-photo/${encodeURIComponent(username)}`);
+      
+      if (response.ok) {
+        const data = await response.json();
+        if (data.photo) {
+          setProfilePhotos(prev => ({ ...prev, [username]: data.photo }));
+          return data.photo;
+        }
+      }
+    } catch (err) {
+      console.error('Error fetching profile photo:', err);
+    }
+    return null;
+  };
+
+  // Get profile photo URL based on username
+  const getProfilePhoto = (name) => {
+    if (!name) return null;
+    const nameLower = name.toLowerCase();
+    
+    // Check if photo is already loaded
+    if (profilePhotos[nameLower]) {
+      return profilePhotos[nameLower];
+    }
+    
+    // Fetch photo from API (async, will update state)
+    fetchProfilePhoto(nameLower);
+    
+    // Return null initially, will update when photo loads
+    return null;
+  };
+
   // Allowed users - only these 2 can login
   const allowedUsers = [
     { username: 'veerendra', userId: 'veeru@123' },
@@ -363,7 +410,19 @@ function App() {
           <div className="profile-panel">
             <div className="profile-content">
               <div className="profile-picture-large">
-                {getInitials(username)}
+                {getProfilePhoto(username) ? (
+                  <img 
+                    src={getProfilePhoto(username)} 
+                    alt={username}
+                    className="profile-photo-large"
+                    onError={(e) => {
+                      e.target.style.display = 'none';
+                      e.target.parentElement.textContent = getInitials(username);
+                    }}
+                  />
+                ) : (
+                  getInitials(username)
+                )}
               </div>
               <h3 className="profile-name">{username}</h3>
               <p className="profile-id">ID: {userId}</p>
@@ -410,7 +469,20 @@ function App() {
               >
                 {!isOwnMessage && (
                   <div className="message-avatar">
-                    {getInitials(msg.username)}
+                    {getProfilePhoto(msg.username) ? (
+                      <img 
+                        src={getProfilePhoto(msg.username)} 
+                        alt={msg.username}
+                        className="avatar-photo"
+                        onError={(e) => {
+                          // Fallback to initials if image fails to load
+                          e.target.style.display = 'none';
+                          e.target.parentElement.textContent = getInitials(msg.username);
+                        }}
+                      />
+                    ) : (
+                      getInitials(msg.username)
+                    )}
                   </div>
                 )}
                 <div className={`message ${isOwnMessage ? 'own-message' : 'other-message'}`}>
@@ -439,7 +511,20 @@ function App() {
                 </div>
                 {isOwnMessage && (
                   <div className="message-avatar own-avatar">
-                    {getInitials(msg.username)}
+                    {getProfilePhoto(msg.username) ? (
+                      <img 
+                        src={getProfilePhoto(msg.username)} 
+                        alt={msg.username}
+                        className="avatar-photo"
+                        onError={(e) => {
+                          // Fallback to initials if image fails to load
+                          e.target.style.display = 'none';
+                          e.target.parentElement.textContent = getInitials(msg.username);
+                        }}
+                      />
+                    ) : (
+                      getInitials(msg.username)
+                    )}
                   </div>
                 )}
               </div>

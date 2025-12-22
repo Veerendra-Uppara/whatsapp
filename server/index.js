@@ -4,7 +4,7 @@ const socketIo = require('socket.io');
 const path = require('path');
 const cors = require('cors');
 const fs = require('fs');
-const { initDatabase, saveMessage, getMessages } = require('./database');
+const { initDatabase, saveMessage, getMessages, getUserProfilePhoto } = require('./database');
 
 const app = express();
 const server = http.createServer(app);
@@ -167,6 +167,26 @@ app.get('/api/messages', async (req, res) => {
   } catch (err) {
     console.error('Error fetching messages:', err);
     res.status(500).json({ error: 'Failed to fetch messages' });
+  }
+});
+
+// API route to get user profile photo
+app.get('/api/user-photo/:username', async (req, res) => {
+  try {
+    if (!db) {
+      return res.status(503).json({ error: 'Database not initialized' });
+    }
+    const { username } = req.params;
+    const photoBase64 = await getUserProfilePhoto(username);
+    
+    if (photoBase64) {
+      res.json({ photo: photoBase64 });
+    } else {
+      res.status(404).json({ error: 'Photo not found' });
+    }
+  } catch (err) {
+    console.error('Error fetching user photo:', err);
+    res.status(500).json({ error: 'Failed to fetch user photo' });
   }
 });
 
