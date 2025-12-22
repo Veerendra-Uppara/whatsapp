@@ -260,6 +260,12 @@ function App() {
     );
   };
 
+  // Format username with first letter capitalized
+  const formatUsername = (name) => {
+    if (!name) return '';
+    return name.charAt(0).toUpperCase() + name.slice(1).toLowerCase();
+  };
+
   if (!hasJoined) {
     return (
       <div className="app">
@@ -320,7 +326,7 @@ function App() {
       <div className="chat-container">
         <div className="chat-header">
           <div className="header-left">
-            <h2 className="app-name">Giddaluru</h2>
+            <h2 className="app-name">{formatUsername(username)}</h2>
           </div>
           <div className="header-actions">
             <button className="header-icon-button" title="Scan QR Code">
