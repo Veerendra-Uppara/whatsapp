@@ -74,7 +74,7 @@ io.on('connection', (socket) => {
   // Handle sending messages
   socket.on('sendMessage', async (messageData) => {
     console.log('📨 Received sendMessage event:', JSON.stringify(messageData, null, 2));
-    const { message, username, userId, timestamp, imageUrl, messageType } = messageData;
+    const { message, username, userId, timestamp, imageUrl, messageType, replyTo } = messageData;
     const user = users.get(socket.id);
     
     console.log('👤 Current user for socket:', user);
@@ -107,7 +107,8 @@ io.on('connection', (socket) => {
       timestamp: messageTimestamp,
       socketId: socket.id,
       imageUrl: imageUrl || null,
-      messageType: messageType || 'text'
+      messageType: messageType || 'text',
+      replyTo: replyTo || null
     };
     
     console.log('Processing message:', { ...messagePayload, imageUrl: imageUrl ? 'present' : 'none' });
