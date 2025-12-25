@@ -72,6 +72,8 @@ export default function ChatUI() {
   const searchInputRef = useRef(null);
   const reactionPickerRef = useRef(null);
   const editInputRef = useRef(null);
+  const touchStartRef = useRef(null); // { x, y, message, timestamp }
+  const inputAreaRef = useRef(null);
 
   // Allowed users - only these 2 can login
   const allowedUsers = [
@@ -580,7 +582,7 @@ export default function ChatUI() {
     }
   };
 
-  // Handle drag to reply
+  // Handle drag to reply (desktop)
   const handleDragStart = (e, msg) => {
     const msgUserId = msg.userId ? msg.userId.trim() : '';
     const currentUserId = userId ? userId.trim() : '';
@@ -589,7 +591,9 @@ export default function ChatUI() {
     // Only allow dragging other person's messages to reply
     if (!isOwnMessage) {
       setDraggingMessage(msg);
-      e.dataTransfer.effectAllowed = 'move';
+      if (e.dataTransfer) {
+        e.dataTransfer.effectAllowed = 'move';
+      }
     } else {
       e.preventDefault();
     }
@@ -601,7 +605,9 @@ export default function ChatUI() {
 
   const handleDragOver = (e) => {
     e.preventDefault();
-    e.dataTransfer.dropEffect = 'move';
+    if (e.dataTransfer) {
+      e.dataTransfer.dropEffect = 'move';
+    }
   };
 
   const handleDrop = (e) => {
@@ -611,6 +617,78 @@ export default function ChatUI() {
       setDraggingMessage(null);
       messageInputRef.current?.focus();
     }
+  };
+
+  // Handle touch to reply (mobile)
+  const handleTouchStart = (e, msg) => {
+    const msgUserId = msg.userId ? msg.userId.trim() : '';
+    const currentUserId = userId ? userId.trim() : '';
+    const isOwnMessage = msgUserId && currentUserId && msgUserId === currentUserId;
+    
+    // Only allow touching other person's messages to reply
+    if (!isOwnMessage) {
+      const touch = e.touches[0];
+      touchStartRef.current = {
+        x: touch.clientX,
+        y: touch.clientY,
+        message: msg,
+        timestamp: Date.now()
+      };
+      setDraggingMessage(msg);
+    }
+  };
+
+  const handleTouchMove = (e) => {
+    if (!touchStartRef.current) return;
+    // Prevent scrolling while dragging
+    if (Math.abs(e.touches[0].clientY - touchStartRef.current.y) > 10) {
+      e.preventDefault();
+    }
+  };
+
+  const handleTouchEnd = (e) => {
+    if (!touchStartRef.current) {
+      setDraggingMessage(null);
+      return;
+    }
+
+    const touchEnd = e.changedTouches[0];
+    const start = touchStartRef.current;
+    
+    // Calculate drag distance
+    const dragDistance = Math.abs(touchEnd.clientY - start.y);
+    const draggedDown = touchEnd.clientY > start.y + 50; // Swipe down at least 50px
+    
+    // Check if touch ended near the input area
+    const inputArea = inputAreaRef.current;
+    let isOverInput = false;
+    
+    if (inputArea) {
+      const inputRect = inputArea.getBoundingClientRect();
+      const touchY = touchEnd.clientY;
+      const touchX = touchEnd.clientX;
+      
+      // Check if touch ended within input area bounds (with generous padding for mobile)
+      isOverInput = touchX >= inputRect.left - 100 && 
+                    touchX <= inputRect.right + 100 &&
+                    touchY >= inputRect.top - 100 && 
+                    touchY <= inputRect.bottom + 100;
+    }
+    
+    // Set reply if: dragged down significantly OR ended over input area
+    // Require minimum 60px drag distance to avoid accidental triggers
+    if (dragDistance > 60 && (isOverInput || draggedDown)) {
+      setReplyingTo(start.message);
+      setTimeout(() => {
+        messageInputRef.current?.focus();
+      }, 150);
+    }
+    
+    // Reset after a short delay to show visual feedback
+    setTimeout(() => {
+      setDraggingMessage(null);
+      touchStartRef.current = null;
+    }, 150);
   };
 
   // Save font size to localStorage
@@ -1291,6 +1369,7 @@ export default function ChatUI() {
         className={`flex-1 ${isDarkMode ? 'whatsapp-bg' : 'bg-gray-50'} px-3 py-2 overflow-y-auto overflow-x-hidden ${showSearch ? 'pt-28' : 'pt-14'}`}
         onDragOver={handleDragOver}
         onDrop={handleDrop}
+        onTouchMove={handleTouchMove}
       >
         {Object.keys(groupedMessages).map((dateKey) => (
           <div key={dateKey}>
@@ -1338,6 +1417,9 @@ export default function ChatUI() {
                     draggable={!isOwnMessage}
                     onDragStart={(e) => handleDragStart(e, msg)}
                     onDragEnd={handleDragEnd}
+                    onTouchStart={(e) => handleTouchStart(e, msg)}
+                    onTouchMove={handleTouchMove}
+                    onTouchEnd={handleTouchEnd}
                     onMouseEnter={() => {
                       clearTimeout(hoverTimeoutRef.current);
                       setHoveredMessage(msg.id);
@@ -1720,7 +1802,11 @@ export default function ChatUI() {
       )}
 
       {/* Input */}
-      <form onSubmit={handleSendMessage} className={`flex items-center gap-1 px-2 py-2 ${bgSecondary} flex-shrink-0 overflow-hidden ${borderColor} border-t`}>
+      <form 
+        ref={inputAreaRef}
+        onSubmit={handleSendMessage} 
+        className={`flex items-center gap-1 px-2 py-2 ${bgSecondary} flex-shrink-0 overflow-hidden ${borderColor} border-t`}
+      >
         {/* Emoji Icon */}
         <button 
           type="button" 
