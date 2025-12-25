@@ -133,12 +133,59 @@ export default function ChatUI() {
 
     newSocket.on('messageHistory', (history) => {
       console.log('Loading message history:', history.length, 'messages');
-      setMessages(history);
+      // Filter out any null or invalid messages
+      const validHistory = Array.isArray(history) ? history.filter(msg => msg && msg.id && msg.timestamp) : [];
+      setMessages(validHistory);
     });
 
     newSocket.on('receiveMessage', (data) => {
       console.log('Received message:', data);
-      setMessages((prev) => [...prev, data]);
+      console.log('Message validation:', {
+        hasData: !!data,
+        hasId: !!data?.id,
+        hasTimestamp: !!data?.timestamp,
+        id: data?.id,
+        timestamp: data?.timestamp
+      });
+      if (data && data.id && data.timestamp) {
+        setMessages((prev) => {
+          // Check if message already exists to avoid duplicates
+          const exists = prev.some(msg => msg.id === data.id);
+          if (exists) {
+            console.log('Message already exists, skipping:', data.id);
+            return prev;
+          }
+          
+          // Replace temporary message with real one if timestamp matches (within 5 seconds)
+          // This handles optimistic updates
+          const tempMessageIndex = prev.findIndex(msg => 
+            msg.id && msg.id.startsWith('temp_') && 
+            msg.username === data.username &&
+            msg.userId === data.userId &&
+            Math.abs(new Date(msg.timestamp).getTime() - new Date(data.timestamp).getTime()) < 5000 &&
+            ((msg.message && data.message && msg.message.trim() === data.message.trim()) ||
+             (msg.imageUrl && data.imageUrl && msg.imageUrl === data.imageUrl))
+          );
+          
+          if (tempMessageIndex !== -1) {
+            console.log('Replacing temporary message with real one');
+            const updated = [...prev];
+            updated[tempMessageIndex] = data;
+            return updated;
+          }
+          
+          console.log('Adding new message to state. Total messages before:', prev.length);
+          const updated = [...prev, data];
+          console.log('Total messages after:', updated.length);
+          return updated;
+        });
+      } else {
+        console.error('Invalid message received - missing required fields:', {
+          data,
+          hasId: !!data?.id,
+          hasTimestamp: !!data?.timestamp
+        });
+      }
     });
 
     newSocket.on('messageReaction', (data) => {
@@ -548,6 +595,13 @@ export default function ChatUI() {
       }
     }
     
+    // Add temporary message immediately for optimistic UI update
+    const tempMessage = {
+      ...messageData,
+      id: `temp_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`
+    };
+    setMessages((prev) => [...prev, tempMessage]);
+    
     socket.emit('sendMessage', messageData);
     setMessage('');
     setReplyingTo(null);
@@ -758,7 +812,7 @@ export default function ChatUI() {
   // Group messages by date
   const groupMessagesByDate = (messagesToGroup = messages) => {
     const grouped = {};
-    messagesToGroup.forEach((msg) => {
+    messagesToGroup.filter(msg => msg && msg.id && msg.timestamp).forEach((msg) => {
       const dateKey = formatDate(msg.timestamp);
       if (!grouped[dateKey]) {
         grouped[dateKey] = [];
@@ -776,12 +830,14 @@ export default function ChatUI() {
   };
 
   // Search messages
-  const filteredMessages = searchQuery.trim() 
+  const filteredMessages = (searchQuery.trim() 
     ? messages.filter(msg => 
-        (msg.message && msg.message.toLowerCase().includes(searchQuery.toLowerCase())) ||
-        (msg.username && msg.username.toLowerCase().includes(searchQuery.toLowerCase()))
+        msg && msg.id && (
+          (msg.message && msg.message.toLowerCase().includes(searchQuery.toLowerCase())) ||
+          (msg.username && msg.username.toLowerCase().includes(searchQuery.toLowerCase()))
+        )
       )
-    : messages;
+    : messages.filter(msg => msg && msg.id));
 
   // Voice recording handlers
   const startRecording = async () => {
@@ -1375,6 +1431,11 @@ export default function ChatUI() {
           <div key={dateKey}>
             <div className="text-center text-[10px] text-gray-400 mb-3 py-1">{dateKey}</div>
             {groupedMessages[dateKey].map((msg, index) => {
+              // Skip null or invalid messages
+              if (!msg || !msg.id) {
+                return null;
+              }
+              
               const msgUserId = msg.userId ? msg.userId.trim() : '';
               const currentUserId = userId ? userId.trim() : '';
               const isOwnMessage = msgUserId && currentUserId && msgUserId === currentUserId;
@@ -1438,10 +1499,10 @@ export default function ChatUI() {
                     }}
                   >
                     {/* Reply preview if this is a reply */}
-                    {msg.replyTo && (
+                    {msg.replyTo && msg.replyTo !== null && (
                       <div className="mb-2 pl-2 border-l-2 border-white/30 text-xs opacity-80">
-                        <div className="font-medium">{msg.replyTo.username}</div>
-                        <div className="truncate">{msg.replyTo.message || '📷 Image'}</div>
+                        <div className="font-medium">{msg.replyTo.username || ''}</div>
+                        <div className="truncate">{(msg.replyTo.message !== null && msg.replyTo.message !== undefined) ? msg.replyTo.message : '📷 Image'}</div>
                       </div>
                     )}
                     {!isOwnMessage && (

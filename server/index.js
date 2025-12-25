@@ -120,22 +120,49 @@ io.on('connection', (socket) => {
     });
     
     // Save message to database
+    let messageToBroadcast = messagePayload;
     if (db) {
       try {
         const saved = await saveMessage(db, messagePayload);
         console.log(`✅ Message saved to database for ${finalUsername} (ID: ${saved.id})`);
+        // Use the saved message with ID for broadcasting, ensuring all fields are present
+        messageToBroadcast = {
+          ...messagePayload,
+          id: saved.id // Override with the saved ID
+        };
+        console.log('Message to broadcast after save:', {
+          id: messageToBroadcast.id,
+          hasId: !!messageToBroadcast.id,
+          hasTimestamp: !!messageToBroadcast.timestamp,
+          message: messageToBroadcast.message ? messageToBroadcast.message.substring(0, 50) : 'null',
+          username: messageToBroadcast.username
+        });
       } catch (err) {
         console.error('❌ Error saving message to database:', err.message);
         console.error('Full error:', err);
-        // Continue anyway - message will still be broadcast
+        // Generate a temporary ID if database save failed
+        messageToBroadcast = {
+          ...messagePayload,
+          id: `temp_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`
+        };
       }
     } else {
       console.warn('⚠️ Database not initialized, message not saved (but still broadcast)');
+      // Generate a temporary ID if database is not available
+      messageToBroadcast = {
+        ...messagePayload,
+        id: `temp_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`
+      };
     }
     
     // Broadcast message to all connected clients (for private chat)
-    console.log('Broadcasting message to all clients');
-    io.emit('receiveMessage', messagePayload);
+    console.log('Broadcasting message to all clients with data:', {
+      id: messageToBroadcast.id,
+      username: messageToBroadcast.username,
+      hasMessage: !!messageToBroadcast.message,
+      timestamp: messageToBroadcast.timestamp
+    });
+    io.emit('receiveMessage', messageToBroadcast);
   });
 
   // Handle mark message as read
