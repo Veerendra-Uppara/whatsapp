@@ -25,6 +25,15 @@ export default function ChatUI() {
     // Restore from localStorage on mount
     return localStorage.getItem('savedUserId') || '';
   });
+  // Use refs to access current username/userId in event handlers without adding to dependencies
+  const usernameRef = useRef(username);
+  const userIdRef = useRef(userId);
+  
+  // Keep refs in sync with state
+  useEffect(() => {
+    usernameRef.current = username;
+    userIdRef.current = userId;
+  }, [username, userId]);
   const [messages, setMessages] = useState([]);
   const [message, setMessage] = useState('');
   const [isConnected, setIsConnected] = useState(false);
@@ -188,9 +197,10 @@ export default function ChatUI() {
       console.log('Joined:', data);
       setHasJoined(true);
       // Save credentials to localStorage on successful join
-      if (username && userId) {
-        localStorage.setItem('savedUsername', username);
-        localStorage.setItem('savedUserId', userId);
+      // Use refs to access current values without adding to dependency array
+      if (usernameRef.current && userIdRef.current) {
+        localStorage.setItem('savedUsername', usernameRef.current);
+        localStorage.setItem('savedUserId', userIdRef.current);
       }
     });
 
