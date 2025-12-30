@@ -102,8 +102,8 @@ export default function ChatUI() {
     { username: 'madhu', userId: 'madhu@123' }
   ];
 
-  // Shared function to get backend URL
-  const getBackendUrl = () => {
+  // Shared function to get backend URL - wrapped in useCallback for stable reference
+  const getBackendUrl = useCallback(() => {
     // First, check for custom backend URL (user-entered)
     if (customBackendUrl && customBackendUrl.trim()) {
       const url = customBackendUrl.trim();
@@ -136,7 +136,7 @@ export default function ChatUI() {
     // Use HTTPS if frontend is HTTPS to avoid mixed content issues
     const protocol = window.location.protocol === 'https:' ? 'https:' : 'http:';
     return `${protocol}//${hostname}:5000`;
-  };
+  }, [customBackendUrl]);
 
   // Test connection to backend
   const testConnection = async () => {
@@ -439,7 +439,7 @@ export default function ChatUI() {
     return () => {
       newSocket.close();
     };
-  }, [customBackendUrl]); // Reconnect when custom backend URL changes
+  }, [customBackendUrl, getBackendUrl]); // Reconnect when custom backend URL changes
 
   // Auto-login when socket connects and credentials are available
   useEffect(() => {
@@ -528,7 +528,7 @@ export default function ChatUI() {
     if (hasJoined) {
       fetchProfilePhotos();
     }
-  }, [hasJoined, messages, username]);
+  }, [hasJoined, messages, username, getBackendUrl]);
 
   const scrollToBottom = () => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
