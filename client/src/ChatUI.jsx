@@ -104,32 +104,84 @@ export default function ChatUI() {
     if (window.location.hostname.includes('pages.dev') || window.location.hostname.includes('cloudflare')) {
       console.error('⚠️ REACT_APP_SOCKET_URL not set! Profile photos and socket may not work.');
       console.error('⚠️ Please set REACT_APP_SOCKET_URL in Cloudflare Pages environment variables.');
+      console.error('⚠️ Make sure to use HTTPS URL (e.g., https://your-app.railway.app)');
     }
     
     // Fallback: try using current hostname (won't work for Cloudflare + Railway)
-    return `http://${hostname}:5000`;
+    // Use HTTPS if frontend is HTTPS to avoid mixed content issues
+    const protocol = window.location.protocol === 'https:' ? 'https:' : 'http:';
+    return `${protocol}//${hostname}:5000`;
   };
 
   useEffect(() => {
-    // Initialize socket connection
+    // Initialize socket connection with better options for poor connectivity
     const socketUrl = getBackendUrl();
     console.log('Connecting to socket:', socketUrl);
-    const newSocket = io(socketUrl);
+    
+    const newSocket = io(socketUrl, {
+      // Enable both websocket and polling transports
+      transports: ['websocket', 'polling'],
+      // Allow fallback to polling if websocket fails (better for slow connections)
+      upgrade: true,
+      // Increase timeout for slow connections
+      timeout: 20000,
+      // Retry connection automatically
+      reconnection: true,
+      reconnectionDelay: 1000,
+      reconnectionDelayMax: 5000,
+      reconnectionAttempts: 5
+    });
+    
     setSocket(newSocket);
 
     // Socket event listeners
     newSocket.on('connect', () => {
-      console.log('Connected to server, socket ID:', newSocket.id);
+      console.log('✅ Connected to server, socket ID:', newSocket.id);
+      console.log('Transport:', newSocket.io.engine.transport.name);
       setIsConnected(true);
+      setLoginError(''); // Clear any previous connection errors
     });
     
     newSocket.on('connect_error', (error) => {
-      console.error('Socket connection error:', error);
+      console.error('❌ Socket connection error:', error);
+      setIsConnected(false);
+      
+      // Provide helpful error messages
+      if (error.message.includes('timeout') || error.message.includes('ECONNREFUSED')) {
+        setLoginError('Unable to connect to server. Please check your internet connection. If you are in an area with slow internet, please wait...');
+      } else if (error.message.includes('xhr poll error')) {
+        setLoginError('Connection issue detected. Trying alternative connection method...');
+      } else {
+        setLoginError(`Connection error: ${error.message}. Please check your internet connection.`);
+      }
     });
 
-    newSocket.on('disconnect', () => {
-      console.log('Disconnected from server');
+    newSocket.on('reconnect_attempt', (attemptNumber) => {
+      console.log(`🔄 Reconnection attempt ${attemptNumber}...`);
+      setLoginError(`Reconnecting... (Attempt ${attemptNumber}/5)`);
+    });
+
+    newSocket.on('reconnect_failed', () => {
+      console.error('❌ Failed to reconnect after all attempts');
+      setLoginError('Failed to connect to server. Please check your internet connection and refresh the page.');
+    });
+
+    newSocket.on('reconnect', (attemptNumber) => {
+      console.log(`✅ Reconnected after ${attemptNumber} attempts`);
+      setLoginError('');
+      setIsConnected(true);
+    });
+
+    newSocket.on('disconnect', (reason) => {
+      console.log('Disconnected from server. Reason:', reason);
       setIsConnected(false);
+      
+      // Show message for unexpected disconnections
+      if (reason === 'io server disconnect') {
+        setLoginError('Server disconnected. Please refresh the page.');
+      } else if (reason === 'transport close') {
+        setLoginError('Connection lost. Attempting to reconnect...');
+      }
     });
 
     newSocket.on('joined', (data) => {
@@ -1118,6 +1170,18 @@ export default function ChatUI() {
               <div className="text-6xl mb-4">💬</div>
               <h1 className="text-2xl font-bold mb-2">Private Chat</h1>
               <p className="text-gray-400 text-sm">Connect and chat securely</p>
+              {/* Connection Status Indicator */}
+              <div className="mt-4 flex items-center justify-center gap-2">
+                <div className={`w-2 h-2 rounded-full ${isConnected ? 'bg-green-500' : 'bg-red-500'} animate-pulse`}></div>
+                <span className={`text-xs ${isConnected ? 'text-green-400' : 'text-red-400'}`}>
+                  {isConnected ? 'Connected' : 'Connecting...'}
+                </span>
+              </div>
+              {!isConnected && (
+                <p className="text-yellow-400 text-xs mt-2">
+                  If you're in an area with slow internet, please wait. The app will try to connect automatically.
+                </p>
+              )}
             </div>
             <form onSubmit={handleJoin} className="space-y-4">
               <div>

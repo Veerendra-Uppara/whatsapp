@@ -12,7 +12,14 @@ const io = socketIo(server, {
   cors: {
     origin: "*",
     methods: ["GET", "POST"]
-  }
+  },
+  // Enable long polling for better connectivity in areas with poor internet
+  transports: ['websocket', 'polling'],
+  // Allow fallback to polling if websocket fails
+  allowEIO3: true,
+  // Increase timeout for slow connections
+  pingTimeout: 60000,
+  pingInterval: 25000
 });
 
 // Middleware
