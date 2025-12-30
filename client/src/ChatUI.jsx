@@ -44,6 +44,12 @@ export default function ChatUI() {
   const [imagePreview, setImagePreview] = useState(null);
   const [loginError, setLoginError] = useState('');
   const [profilePhotos, setProfilePhotos] = useState({});
+  const [showConnectionTest, setShowConnectionTest] = useState(false);
+  const [connectionTestResult, setConnectionTestResult] = useState(null);
+  const [customBackendUrl, setCustomBackendUrl] = useState(() => {
+    return localStorage.getItem('customBackendUrl') || '';
+  });
+  const [isTestingConnection, setIsTestingConnection] = useState(false);
   const [messageFontSize, setMessageFontSize] = useState(() => {
     const saved = localStorage.getItem('messageFontSize');
     return saved ? parseInt(saved) : 14;
@@ -98,7 +104,17 @@ export default function ChatUI() {
 
   // Shared function to get backend URL
   const getBackendUrl = () => {
-    // First, check for environment variable (set at build time)
+    // First, check for custom backend URL (user-entered)
+    if (customBackendUrl && customBackendUrl.trim()) {
+      const url = customBackendUrl.trim();
+      // Ensure URL has protocol
+      if (!url.startsWith('http://') && !url.startsWith('https://')) {
+        return `https://${url}`;
+      }
+      return url;
+    }
+    
+    // Second, check for environment variable (set at build time)
     if (process.env.REACT_APP_SOCKET_URL) {
       return process.env.REACT_APP_SOCKET_URL;
     }
@@ -120,6 +136,115 @@ export default function ChatUI() {
     // Use HTTPS if frontend is HTTPS to avoid mixed content issues
     const protocol = window.location.protocol === 'https:' ? 'https:' : 'http:';
     return `${protocol}//${hostname}:5000`;
+  };
+
+  // Test connection to backend
+  const testConnection = async () => {
+    setIsTestingConnection(true);
+    setConnectionTestResult(null);
+    
+    const backendUrl = getBackendUrl();
+    const results = {
+      backendUrl,
+      timestamp: new Date().toLocaleString(),
+      tests: []
+    };
+
+    // Test 1: Check if URL is valid
+    try {
+      const url = new URL(backendUrl);
+      results.tests.push({ name: 'URL Format', status: 'success', message: `Valid URL: ${url.protocol}//${url.hostname}` });
+    } catch (e) {
+      results.tests.push({ name: 'URL Format', status: 'error', message: `Invalid URL: ${e.message}` });
+      setConnectionTestResult(results);
+      setIsTestingConnection(false);
+      return;
+    }
+
+    // Test 2: Try to fetch from backend (health check)
+    try {
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), 10000); // 10 second timeout
+      
+      const response = await fetch(`${backendUrl}/api/health`, {
+        method: 'GET',
+        signal: controller.signal,
+        mode: 'cors'
+      });
+      
+      clearTimeout(timeoutId);
+      
+      if (response.ok) {
+        results.tests.push({ name: 'Backend Reachable', status: 'success', message: 'Backend server is reachable' });
+      } else {
+        results.tests.push({ name: 'Backend Reachable', status: 'warning', message: `Server responded with status: ${response.status}` });
+      }
+    } catch (e) {
+      if (e.name === 'AbortError') {
+        results.tests.push({ name: 'Backend Reachable', status: 'error', message: 'Connection timeout (10s). Server may be unreachable or very slow.' });
+      } else if (e.message.includes('CORS')) {
+        results.tests.push({ name: 'Backend Reachable', status: 'error', message: 'CORS error. Server may not allow requests from this origin.' });
+      } else if (e.message.includes('Failed to fetch')) {
+        results.tests.push({ name: 'Backend Reachable', status: 'error', message: 'Network error. Check your internet connection or firewall settings.' });
+      } else {
+        results.tests.push({ name: 'Backend Reachable', status: 'error', message: `Error: ${e.message}` });
+      }
+    }
+
+    // Test 3: Try Socket.io connection
+    try {
+      const testSocket = io(backendUrl, {
+        transports: ['polling', 'websocket'],
+        timeout: 5000,
+        reconnection: false
+      });
+
+      const connectPromise = new Promise((resolve, reject) => {
+        const timeout = setTimeout(() => {
+          testSocket.close();
+          reject(new Error('Socket connection timeout (5s)'));
+        }, 5000);
+
+        testSocket.on('connect', () => {
+          clearTimeout(timeout);
+          testSocket.close();
+          resolve('Connected');
+        });
+
+        testSocket.on('connect_error', (error) => {
+          clearTimeout(timeout);
+          testSocket.close();
+          reject(error);
+        });
+      });
+
+      await connectPromise;
+      results.tests.push({ name: 'Socket.io Connection', status: 'success', message: 'Socket.io connection successful' });
+    } catch (e) {
+      results.tests.push({ name: 'Socket.io Connection', status: 'error', message: `Socket.io error: ${e.message}` });
+    }
+
+    // Test 4: DNS Resolution
+    try {
+      const url = new URL(backendUrl);
+      const hostname = url.hostname;
+      // Try to resolve DNS by creating an image request
+      const img = new Image();
+      const dnsPromise = new Promise((resolve, reject) => {
+        img.onload = () => resolve('DNS resolved');
+        img.onerror = () => reject(new Error('DNS resolution failed'));
+        setTimeout(() => reject(new Error('DNS resolution timeout')), 5000);
+        img.src = `${backendUrl}/favicon.ico?t=${Date.now()}`;
+      });
+      await dnsPromise;
+      results.tests.push({ name: 'DNS Resolution', status: 'success', message: `DNS resolved for ${hostname}` });
+    } catch (e) {
+      const url = new URL(backendUrl);
+      results.tests.push({ name: 'DNS Resolution', status: 'error', message: `DNS error for ${url.hostname}: ${e.message}` });
+    }
+
+    setConnectionTestResult(results);
+    setIsTestingConnection(false);
   };
 
   useEffect(() => {
@@ -314,7 +439,7 @@ export default function ChatUI() {
     return () => {
       newSocket.close();
     };
-  }, []);
+  }, [customBackendUrl]); // Reconnect when custom backend URL changes
 
   // Auto-login when socket connects and credentials are available
   useEffect(() => {
@@ -1235,6 +1360,88 @@ export default function ChatUI() {
               >
                 Join Chat
               </button>
+              
+              {/* Connection Troubleshooting */}
+              <div className="mt-4 pt-4 border-t border-gray-700">
+                <button
+                  type="button"
+                  onClick={() => setShowConnectionTest(!showConnectionTest)}
+                  className="w-full text-sm text-gray-400 hover:text-gray-300 underline"
+                >
+                  {showConnectionTest ? 'Hide' : 'Show'} Connection Troubleshooting
+                </button>
+                
+                {showConnectionTest && (
+                  <div className="mt-4 space-y-4">
+                    {/* Custom Backend URL */}
+                    <div>
+                      <label className="block text-xs font-medium mb-2 text-gray-400">
+                        Custom Backend URL (if default doesn't work)
+                      </label>
+                      <input
+                        type="text"
+                        placeholder="e.g., https://your-app.railway.app"
+                        value={customBackendUrl}
+                        onChange={(e) => {
+                          const url = e.target.value;
+                          setCustomBackendUrl(url);
+                          localStorage.setItem('customBackendUrl', url);
+                        }}
+                        className="w-full bg-[#2a3942] rounded-lg px-3 py-2 text-white text-xs placeholder-gray-500 outline-none focus:ring-2 focus:ring-[#00a884]"
+                      />
+                      <p className="text-xs text-gray-500 mt-1">
+                        Leave empty to use default. Get this URL from your friend in Bangalore.
+                      </p>
+                    </div>
+                    
+                    {/* Test Connection Button */}
+                    <button
+                      type="button"
+                      onClick={testConnection}
+                      disabled={isTestingConnection}
+                      className="w-full bg-[#2a3942] hover:bg-[#3a4a52] disabled:opacity-50 text-white text-sm font-medium py-2 rounded-lg transition-colors"
+                    >
+                      {isTestingConnection ? 'Testing...' : 'Test Connection'}
+                    </button>
+                    
+                    {/* Connection Test Results */}
+                    {connectionTestResult && (
+                      <div className="bg-[#1a2529] rounded-lg p-3 text-xs">
+                        <div className="text-gray-400 mb-2">
+                          <strong>Backend URL:</strong> {connectionTestResult.backendUrl}
+                        </div>
+                        <div className="text-gray-500 mb-2">
+                          Tested at: {connectionTestResult.timestamp}
+                        </div>
+                        <div className="space-y-1">
+                          {connectionTestResult.tests.map((test, idx) => (
+                            <div key={idx} className="flex items-start gap-2">
+                              <span className={test.status === 'success' ? 'text-green-400' : test.status === 'warning' ? 'text-yellow-400' : 'text-red-400'}>
+                                {test.status === 'success' ? '✅' : test.status === 'warning' ? '⚠️' : '❌'}
+                              </span>
+                              <div>
+                                <div className="text-gray-300 font-medium">{test.name}</div>
+                                <div className="text-gray-500">{test.message}</div>
+                              </div>
+                            </div>
+                          ))}
+                        </div>
+                        {connectionTestResult.tests.some(t => t.status === 'error') && (
+                          <div className="mt-3 p-2 bg-yellow-900/30 rounded text-yellow-300 text-xs">
+                            <strong>Tip:</strong> If connection fails, try:
+                            <ul className="list-disc list-inside mt-1 space-y-1">
+                              <li>Ask your friend in Bangalore for the exact backend URL</li>
+                              <li>Try using mobile data instead of WiFi (or vice versa)</li>
+                              <li>Check if your network/firewall is blocking the connection</li>
+                              <li>Try using a VPN if available</li>
+                            </ul>
+                          </div>
+                        )}
+                      </div>
+                    )}
+                  </div>
+                )}
+              </div>
             </form>
           </div>
         </div>
